@@ -1,0 +1,7 @@
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{serial}=="336E36633335", MODE="0660", GROUP="dialout", SYMLINK+="tm_imu_1"
+
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{serial}=="336A36753335", MODE="0660", GROUP="dialout", SYMLINK+="tm_imu_2"
+
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{serial}=="336B36763335", MODE="0660", GROUP="dialout", SYMLINK+="tm_imu_3"
+
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{serial}=="337336763335", MODE="0660", GROUP="dialout", SYMLINK+="tm_imu_4"

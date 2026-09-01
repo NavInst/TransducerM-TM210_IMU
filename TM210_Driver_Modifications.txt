@@ -1,0 +1,378 @@
+TM210 ROS2 Driver Modifications
+Temperature, Sensor Timestamp, and Acceleration Unit Conversion
+
+Overview
+--------
+The original tm_imu ROS2 driver was modified to add access to two pieces of information that were already available from the TM210 protocol:
+
+1. The TM210 internal sensor timestamp
+2. The TM210 internal temperature
+
+In addition, the accelerometer measurements published in sensor_msgs/msg/Imu were converted from units of g to SI units of m/s^2.
+
+The existing gyroscope, magnetometer, quaternion/orientation, and RPY processing were left unchanged.
+
+
+Modified Files
+--------------
+The following two source files were modified:
+
+1. ~/imu_ws/src/tm_imu/src/tm_imu_node.cpp
+2. ~/imu_ws/src/tm_imu/include/tm_imu/tm_imu_node.hpp
+
+The .hpp file was modified to support the additional temperature and sensor-time publishers and related variables.
+
+The .cpp file was modified to:
+- Publish temperature
+- Publish the TM210 internal sensor timestamp
+- Request STATUS information from the TM210
+- Use a single ROS/computer timestamp per processing cycle for the published messages
+- Convert acceleration from g to m/s^2
+
+No changes were made to:
+- EasyProfile
+- serialib
+- CMakeLists.txt
+- package.xml
+- multi_tm_imu.launch.py
+- Existing IMU topic names
+- Gyroscope measurement units
+- Magnetometer processing
+- Quaternion/orientation processing
+- Roll, pitch, and yaw processing
+
+
+New ROS Topics
+--------------
+
+Two new topics were added for each TM210 IMU.
+
+For IMU 1:
+
+/tm_imu_1/temperature
+/tm_imu_1/sensor_time
+
+For IMU 2:
+
+/tm_imu_2/temperature
+/tm_imu_2/sensor_time
+
+For IMU 3:
+
+/tm_imu_3/temperature
+/tm_imu_3/sensor_time
+
+
+1. Temperature Topic
+--------------------
+
+Topic example:
+
+/tm_imu_1/temperature
+
+ROS message type:
+
+sensor_msgs/msg/Temperature
+
+The temperature is obtained from the TM210 EP_CMD_STATUS_ packet.
+
+The driver sends a STATUS request to each TM210 approximately once per second.
+
+The returned status packet contains the sensor temperature as a floating-point value in degrees Celsius.
+
+Example:
+
+temperature: 18.4
+
+This represents approximately:
+
+18.4 degrees Celsius
+
+The temperature is the temperature reported internally by the TM210 sensor/electronics. It should not necessarily be expected to exactly equal ambient room temperature.
+
+The driver also reads the updateRate field from the STATUS packet and prints it once at startup.
+
+Example:
+
+Receiving EP_CMD_STATUS_: temperature=18.20 C, sensor update rate=802 Hz
+
+The approximately 802 Hz value represents the TM210 internal sampling/update rate.
+
+It is NOT the configured output data rate.
+
+For example, the TM210 may internally sample at approximately 800 Hz while its output data rate is configured to 200 Hz.
+
+
+2. Sensor Time Topic
+--------------------
+
+Topic example:
+
+/tm_imu_1/sensor_time
+
+ROS message type:
+
+sensor_msgs/msg/TimeReference
+
+The TM210 raw gyro/accelerometer/magnetometer packet already contains its own timestamp:
+
+Ep_Raw_GyroAccMag.timeStamp
+
+The original ROS driver did not use this timestamp.
+
+The modified driver now reads this TM210-generated timestamp and publishes it on the sensor_time topic.
+
+The TimeReference message contains two different timestamps:
+
+header.stamp
+
+This is the ROS/Linux computer timestamp.
+
+It represents the time at which the ROS driver processed and published the sensor information.
+
+time_ref
+
+This is the TM210's own internal sensor timestamp.
+
+It represents the sensor's internal time since power-on.
+
+Example:
+
+header:
+  stamp:
+    sec: 1787929038
+    nanosec: 189842159
+
+time_ref:
+  sec: 754
+  nanosec: 390000000
+
+In this example:
+
+header.stamp = ROS/Linux computer time
+
+time_ref = 754.390 seconds since the TM210 was powered on
+
+
+Sensor Timestamp Resolution and Rollover
+----------------------------------------
+
+The TM210 timestamp is provided as a 32-bit unsigned integer in microseconds.
+
+The modified driver converts this value into ROS seconds and nanoseconds.
+
+Because a 32-bit microsecond counter rolls over after approximately 71.6 minutes, rollover handling was added.
+
+This allows the sensor_time topic to remain continuous during recordings longer than approximately 71.6 minutes.
+
+
+ROS Timestamp Handling
+----------------------
+
+In the original driver, this->get_clock()->now() was called separately for several ROS messages.
+
+The modified driver now calls the ROS clock once per processing cycle:
+
+const auto ros_stamp = this->get_clock()->now();
+
+That same timestamp is then assigned to:
+
+imu_data_msg.header.stamp
+imu_data_rpy_msg.header.stamp
+imu_data_mag_msg.header.stamp
+imu_temperature_msg.header.stamp
+imu_sensor_time_msg.header.stamp
+
+This prevents small artificial timestamp differences between messages that were processed during the same ROS callback.
+
+The sensor_time.time_ref value remains separate because it represents the TM210's own internal clock.
+
+
+3. Acceleration Conversion from g to m/s^2
+-------------------------------------------
+
+The TM210 Ep_Raw_GyroAccMag packet reports:
+
+Gyroscope:
+    Unit = rad/s
+
+Accelerometer:
+    Unit = g
+
+Magnetometer:
+    Unit = one Earth magnetic field
+
+The ROS sensor_msgs/msg/Imu message expects linear_acceleration to be expressed in SI units of m/s^2.
+
+Therefore, the acceleration values are converted before being published.
+
+The TM210 driver documentation/comment uses:
+
+1 g = 9.794 m/s^2
+
+The conversion used in the modified driver is:
+
+constexpr float TM210_GRAVITY = 9.794f;
+
+float acc_x = ep_Raw_GyroAccMag.acc[0] * TM210_GRAVITY;
+float acc_y = ep_Raw_GyroAccMag.acc[1] * TM210_GRAVITY;
+float acc_z = ep_Raw_GyroAccMag.acc[2] * TM210_GRAVITY;
+
+These converted values are then published as:
+
+imu_data_msg.linear_acceleration.x
+imu_data_msg.linear_acceleration.y
+imu_data_msg.linear_acceleration.z
+
+Example:
+
+1.0 g
+    becomes
+9.794 m/s^2
+
+0.5 g
+    becomes
+4.897 m/s^2
+
+For a stationary IMU, depending on its orientation, one acceleration axis should normally measure approximately +/-9.8 m/s^2 due to gravity.
+
+
+Combo Packet Acceleration Conversion
+------------------------------------
+
+The EP_CMD_COMBO_ packet represents acceleration in units of 0.00001 g.
+
+For completeness, the Combo case was also converted to m/s^2:
+
+float ax = ep_Combo.ax * 1e-5f * TM210_GRAVITY;
+float ay = ep_Combo.ay * 1e-5f * TM210_GRAVITY;
+float az = ep_Combo.az * 1e-5f * TM210_GRAVITY;
+
+The gyroscope values in the Combo packet remain in rad/s and are NOT multiplied by the gravity conversion factor.
+
+
+Measurements Left Unchanged
+----------------------------
+
+Only the acceleration unit conversion was changed in the existing imu_data measurements.
+
+The following were left unchanged:
+
+Gyroscope:
+    Remains in rad/s
+
+Magnetometer:
+    Existing processing remains unchanged
+
+Quaternion/orientation:
+    Existing processing remains unchanged
+
+Roll, pitch, and yaw:
+    Existing processing remains unchanged
+
+Temperature:
+    Added as a new topic
+
+Sensor timestamp:
+    Added as a new topic
+
+
+Existing Topics
+---------------
+
+The original topics remain available:
+
+/tm_imu_1/imu_data
+/tm_imu_1/imu_data_mag
+/tm_imu_1/imu_data_rpy
+
+/tm_imu_2/imu_data
+/tm_imu_2/imu_data_mag
+/tm_imu_2/imu_data_rpy
+
+/tm_imu_3/imu_data
+/tm_imu_3/imu_data_mag
+/tm_imu_3/imu_data_rpy
+
+The topic names and message structure were intentionally kept the same.
+
+The main change to /imu_data is that:
+
+linear_acceleration
+
+is now expressed in:
+
+m/s^2
+
+instead of:
+
+g
+
+
+Final Topic Structure
+---------------------
+
+Each TM210 now publishes:
+
+/tm_imu_X/imu_data
+/tm_imu_X/imu_data_mag
+/tm_imu_X/imu_data_rpy
+/tm_imu_X/temperature
+/tm_imu_X/sensor_time
+
+where X is 1, 2, or 3.
+
+
+Timestamp Interpretation
+------------------------
+
+The two timestamp sources should be interpreted as follows:
+
+ROS header.stamp
+    = Linux/ROS computer clock
+
+TM210 sensor_time.time_ref
+    = TM210 internal sensor clock since power-on
+
+Keeping both timestamps makes it possible to compare the sensor's internal timing against the computer/ROS timing during later analysis.
+
+
+Current TM210 Rate Configuration
+--------------------------------
+
+The TM210 units were configured through ImuAssistant to use:
+
+Output Data Rate (ODR): 200 Hz
+
+The STATUS packet reports approximately:
+
+Internal sampling/update rate: 802 Hz
+
+These are different quantities.
+
+Approximately 802 Hz:
+    TM210 internal sampling/update rate
+
+200 Hz:
+    Configured TM210 output data rate
+
+timer_period:
+    How frequently the ROS driver checks the serial port
+
+The ROS timer does not directly configure the TM210 sensor's output data rate.
+
+
+Recording
+---------
+
+When recording all TM210 topics using a namespace regex, the new temperature and sensor_time topics are automatically included.
+
+Example:
+
+timeout --signal=INT 10m ros2 bag record \
+  -o three_tm_imus_10min \
+  -e '^/tm_imu_[123]/.*'
+
+This records the original IMU topics together with the new temperature and sensor timestamp topics for all three TM210 IMUs.
+
+The /imu_data linear_acceleration values stored in the bag are now in m/s^2 rather than g.
