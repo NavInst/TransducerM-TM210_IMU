@@ -1,3 +1,7 @@
+# This driver was modified
+Some modification were done to this driver to include extra topics like temperature and sensor timestamps
+And the acceleration unit was converted from 'g' to 'm/s^2'
+
 # tm_imu
 This package implements a ROS2 node of TransducerM AHRS/IMU from SYD Dynamics. 
 
