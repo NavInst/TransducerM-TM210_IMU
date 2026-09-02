@@ -1,7 +1,8 @@
 -------------------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------
- To see the modifications that were done to the driver please refer to the 'TM210_Driver_Modifications.txt' file in this repository
+To see the modifications that were done to the driver please refer to the 'TM210_Driver_Modifications.txt' file in this repository
 To see the driver's original README please refer to the file 'tm_imu\README.md' in this repository
+Github link: https://github.com/NavInst/TransducerM-TM210_IMU
 ------------------------------------------------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------------------
 
